@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 dotenv.config({ override: true });
 import express from "express";
+import cors from "cors";
 import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
@@ -30,6 +31,13 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 
 async function startServer() {
   const app = express();
+  app.use(cors({
+    origin: [
+      "http://localhost:3000",
+      "https://fitness-tracker-system.vercel.app"
+    ],
+    credentials: true
+  }));
   const server = createServer(app);
   
   // Configure body parser with larger size limit for file uploads
