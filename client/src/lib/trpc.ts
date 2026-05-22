@@ -9,7 +9,7 @@ export const trpc = createTRPCReact<AppRouter>();
 export const trpcClient = createTRPCProxyClient<AppRouter>({
   links: [
     httpBatchLink({
-      url: "/api/trpc",
+      url: `${import.meta.env.VITE_API_URL}/trpc`,
       transformer: superjson,
       async headers() {
         const user = auth.currentUser;
