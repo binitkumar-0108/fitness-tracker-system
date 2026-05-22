@@ -1,12 +1,9 @@
-import { COOKIE_NAME } from "@shared/const";
-import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router, protectedProcedure } from "./_core/trpc";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import * as db from "./db";
 import { upsertUser } from "./db";
-import { sdk } from "./_core/sdk";
 import { analyzeUserDay } from "./services/insightEngine";
 import { syncDailyMetrics } from "./services/metricService";
 
@@ -428,41 +425,23 @@ export const appRouter = router({
   }),
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
-  login: publicProcedure
-  .input(z.object({
-    openId: z.string(),
-    name: z.string().nullable(),
-    email: z.string().nullable(),
-    loginMethod: z.string()
-  }))
-  .mutation(async ({ input, ctx }) => {
-
-    await upsertUser({
-      openId: input.openId,
-      name: input.name,
-      email: input.email,
-      loginMethod: input.loginMethod
-    });
-
-    const cookieOptions = getSessionCookieOptions(ctx.req);
-    const sessionToken = await sdk.createSessionToken(input.openId, {
-      name: input.name ?? "User"
-    });
-
-    console.log(`[Auth] Setting cookie ${COOKIE_NAME} with options:`, cookieOptions);
-    console.log(`[Auth] Session token generated for: ${input.openId}`);
-
-    ctx.res.cookie(
-      COOKIE_NAME,
-      sessionToken,
-      cookieOptions
-    );
-
-    return { success: true };
-  }),
-    logout: publicProcedure.mutation(({ ctx }) => {
-      const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+    login: publicProcedure
+      .input(z.object({
+        openId: z.string(),
+        name: z.string().nullable(),
+        email: z.string().nullable(),
+        loginMethod: z.string()
+      }))
+      .mutation(async ({ input }) => {
+        await upsertUser({
+          openId: input.openId,
+          name: input.name,
+          email: input.email,
+          loginMethod: input.loginMethod
+        });
+        return { success: true };
+      }),
+    logout: publicProcedure.mutation(() => {
       return {  
         success: true,
       } as const;

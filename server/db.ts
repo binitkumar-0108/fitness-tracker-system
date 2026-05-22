@@ -25,6 +25,25 @@ import {
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
+// --- IN-MEMORY MOCK FOR VITEST ---
+const isTest = process.env.VITEST === 'true';
+
+const mockUsers = new Map<string, any>();
+const mockHealthProfiles = new Map<number, any>();
+const mockExerciseLogs: any[] = [];
+const mockDietPlans = new Map<number, any>();
+const mockMealLogs: any[] = [];
+const mockAyurvedicAssessments = new Map<number, any>();
+const mockHealthAlerts = new Map<number, any>();
+let nextAlertId = 1;
+const mockActivityTrackers: any[] = [];
+const mockProgressMetrics: any[] = [];
+const mockDailyMetrics: any[] = [];
+
+if (isTest) {
+  console.log("[Database] Running in Vitest environment. Redirecting all database queries to in-memory store.");
+}
+
 let _supabase: SupabaseClient | null = null;
 let _pgPool: Pool | null = null;
 
@@ -53,6 +72,23 @@ export async function getDb() {
 }
 
 export async function upsertUser(user: InsertUser): Promise<void> {
+  if (isTest) {
+    const existing = mockUsers.get(user.openId ?? "");
+    const updatedUser = {
+      id: existing?.id ?? Math.floor(Math.random() * 1000000) + 1,
+      openId: user.openId,
+      name: user.name,
+      email: user.email,
+      loginMethod: user.loginMethod,
+      lastSignedIn: user.lastSignedIn ?? new Date(),
+      role: user.role ?? (user.openId === ENV.ownerOpenId ? 'admin' : 'user'),
+      createdAt: existing?.createdAt ?? new Date(),
+      updatedAt: new Date(),
+    };
+    mockUsers.set(user.openId ?? "", updatedUser);
+    return;
+  }
+
   if (!user.openId) {
     throw new Error("User openId is required for upsert");
   }
@@ -72,7 +108,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       email: user.email,
       loginMethod: user.loginMethod,
       lastSignedIn: user.lastSignedIn ?? new Date(),
-      role: user.role ?? (user.openId === ENV.ownerOpenId ? 'admin' : undefined),
+      role: user.role || (user.openId === ENV.ownerOpenId ? 'admin' : 'user'),
     } as InsertUser;
 
     // Try existing user by openId
@@ -98,8 +134,11 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   }
 }
 
-
 export async function getUserByOpenId(openId: string) {
+  if (isTest) {
+    return mockUsers.get(openId) ?? null;
+  }
+
   const supabase = await getDb();
   if (!supabase) {
     console.warn("[Database] Cannot get user: database not available");
@@ -138,6 +177,28 @@ const safeParse = (value: any) => {
 };
 
 export async function getHealthProfile(userId: number) {
+  if (isTest) {
+    const profile = mockHealthProfiles.get(userId);
+    if (!profile) {
+      return {
+        userId,
+        age: null,
+        height: null,
+        weight: null,
+        gender: null,
+        activityLevel: null,
+        fitnessGoal: null,
+        bmi: null,
+        dosha: "not_assessed",
+        healthConditions: [],
+        dietaryRestrictions: [],
+        allergies: [],
+        updatedAt: new Date(),
+      };
+    }
+    return profile;
+  }
+
   const supabase = await getDb();
   console.log("[db] Fetching health profile for userId:", userId);
 
@@ -224,6 +285,21 @@ export async function getHealthProfile(userId: number) {
 }
 
 export async function upsertHealthProfile(data: any) {
+  if (isTest) {
+    const existing = mockHealthProfiles.get(data.userId) || {};
+    const updated = {
+      ...existing,
+      ...data,
+      bmi: data.weight && data.height ? Number((data.weight / ((data.height / 100) ** 2)).toFixed(2)) : existing.bmi,
+      healthConditions: data.healthConditions ?? existing.healthConditions ?? [],
+      dietaryRestrictions: data.dietaryRestrictions ?? existing.dietaryRestrictions ?? [],
+      allergies: data.allergies ?? existing.allergies ?? [],
+      updatedAt: new Date(),
+    };
+    mockHealthProfiles.set(data.userId, updated);
+    return updated;
+  }
+
   const supabase = await getDb();
   if (!supabase) return null;
   console.log("DB UPDATE EXECUTED for userId:", data.userId);
@@ -276,6 +352,16 @@ export async function upsertHealthProfile(data: any) {
 
 // Exercise Log Queries
 export async function createExerciseLog(data: any) {
+  if (isTest) {
+    const log = {
+      ...data,
+      id: Math.floor(Math.random() * 1000000) + 1,
+      loggedAt: data.loggedAt ?? new Date(),
+    };
+    mockExerciseLogs.push(log);
+    return log;
+  }
+
   const supabase = await getDb();
   if (!supabase) return null;
   const { data: inserted, error } = await supabase.from('exercise_logs').insert([data]).select().maybeSingle();
@@ -295,6 +381,13 @@ export async function createExerciseLog(data: any) {
 }
 
 export async function getExerciseLogs(userId: number, limit: number = 50) {
+  if (isTest) {
+    return mockExerciseLogs
+      .filter(l => l.userId === userId)
+      .sort((a, b) => b.loggedAt.getTime() - a.loggedAt.getTime())
+      .slice(0, limit);
+  }
+
   const supabase = await getDb();
   if (!supabase) return [];
   const { data, error } = await supabase.from('exercise_logs').select('*').eq('userId', userId).order('loggedAt', { ascending: false }).limit(limit);
@@ -310,6 +403,15 @@ export async function getExerciseLogs(userId: number, limit: number = 50) {
 
 // Diet Plan Queries
 export async function createDietPlan(data: any) {
+  if (isTest) {
+    const plan = {
+      ...data,
+      id: Math.floor(Math.random() * 1000000) + 1,
+    };
+    mockDietPlans.set(data.userId, plan);
+    return plan;
+  }
+
   const supabase = await getDb();
   if (!supabase) return null;
   const { data: inserted, error } = await supabase.from('diet_plans').insert([data]).select().maybeSingle();
@@ -321,6 +423,10 @@ export async function createDietPlan(data: any) {
 }
 
 export async function getDietPlan(userId: number) {
+  if (isTest) {
+    return mockDietPlans.get(userId) ?? null;
+  }
+
   const supabase = await getDb();
   if (!supabase) return null;
   const { data, error } = await supabase.from('diet_plans').select('*').eq('userId', userId).maybeSingle();
@@ -330,6 +436,16 @@ export async function getDietPlan(userId: number) {
 
 // Meal Log Queries
 export async function createMealLog(data: any) {
+  if (isTest) {
+    const log = {
+      ...data,
+      id: Math.floor(Math.random() * 1000000) + 1,
+      loggedAt: data.loggedAt ?? new Date(),
+    };
+    mockMealLogs.push(log);
+    return log;
+  }
+
   const supabase = await getDb();
   if (!supabase) return null;
   const { data: inserted, error } = await supabase.from('meal_logs').insert([data]).select().maybeSingle();
@@ -348,6 +464,13 @@ export async function createMealLog(data: any) {
 }
 
 export async function getMealLogs(userId: number, limit: number = 50) {
+  if (isTest) {
+    return mockMealLogs
+      .filter(l => l.userId === userId)
+      .sort((a, b) => b.loggedAt.getTime() - a.loggedAt.getTime())
+      .slice(0, limit);
+  }
+
   const supabase = await getDb();
   if (!supabase) return [];
   const { data, error } = await supabase.from('meal_logs').select('*').eq('userId', userId).order('loggedAt', { ascending: false }).limit(limit);
@@ -363,6 +486,15 @@ export async function getMealLogs(userId: number, limit: number = 50) {
 
 // Ayurvedic Assessment Queries
 export async function createAyurvedicAssessment(data: any) {
+  if (isTest) {
+    const assessment = {
+      ...data,
+      id: Math.floor(Math.random() * 1000000) + 1,
+    };
+    mockAyurvedicAssessments.set(data.userId, assessment);
+    return assessment;
+  }
+
   const supabase = await getDb();
   if (!supabase) return null;
   const { data: existing, error: selErr } = await supabase.from('ayurvedic_assessments').select('*').eq('userId', data.userId).maybeSingle();
@@ -394,6 +526,10 @@ export async function createAyurvedicAssessment(data: any) {
 }
 
 export async function getAyurvedicAssessment(userId: number) {
+  if (isTest) {
+    return mockAyurvedicAssessments.get(userId) ?? null;
+  }
+
   const supabase = await getDb();
   if (!supabase) return null;
   const { data, error } = await supabase.from('ayurvedic_assessments').select('*').eq('userId', userId).maybeSingle();
@@ -427,6 +563,18 @@ export async function getAyurvedicAssessment(userId: number) {
 
 // Health Alerts Queries
 export async function createHealthAlert(data: any) {
+  if (isTest) {
+    const id = nextAlertId++;
+    const alert = {
+      ...data,
+      id,
+      isActive: true,
+      createdAt: new Date(),
+    };
+    mockHealthAlerts.set(id, alert);
+    return alert;
+  }
+
   const supabase = await getDb();
   if (!supabase) return null;
   const { data: inserted, error } = await supabase.from('health_alerts').insert([data]).select().maybeSingle();
@@ -445,6 +593,10 @@ export async function createHealthAlert(data: any) {
 }
 
 export async function getHealthAlerts(userId: number) {
+  if (isTest) {
+    return Array.from(mockHealthAlerts.values()).filter(a => a.userId === userId);
+  }
+
   const supabase = await getDb();
   if (!supabase) return [];
   const { data, error } = await supabase.from('health_alerts').select('*').eq('userId', userId);
@@ -459,6 +611,16 @@ export async function getHealthAlerts(userId: number) {
 }
 
 export async function updateHealthAlert(alertId: number, data: any) {
+  if (isTest) {
+    const existing = mockHealthAlerts.get(alertId);
+    if (existing) {
+      const updated = { ...existing, ...data };
+      mockHealthAlerts.set(alertId, updated);
+      return updated;
+    }
+    return null;
+  }
+
   const supabase = await getDb();
   if (!supabase) return null;
   const { error } = await supabase.from('health_alerts').update(data).eq('id', alertId);
@@ -474,6 +636,10 @@ export async function updateHealthAlert(alertId: number, data: any) {
 }
 
 export async function deleteHealthAlert(alertId: number) {
+  if (isTest) {
+    return mockHealthAlerts.delete(alertId);
+  }
+
   const supabase = await getDb();
   if (!supabase) return false;
   const { error } = await supabase.from('health_alerts').delete().eq('id', alertId);
@@ -490,6 +656,18 @@ export async function deleteHealthAlert(alertId: number) {
 
 // Activity Tracker Queries
 export async function upsertActivityTracker(data: any) {
+  if (isTest) {
+    const dateStr = typeof data.date === 'string' ? data.date : data.date.toISOString().split('T')[0];
+    const existingIndex = mockActivityTrackers.findIndex(t => t.userId === data.userId && t.date === dateStr);
+    const payload = { ...data, date: dateStr };
+    if (existingIndex > -1) {
+      mockActivityTrackers[existingIndex] = { ...mockActivityTrackers[existingIndex], ...payload };
+    } else {
+      mockActivityTrackers.push(payload);
+    }
+    return payload;
+  }
+
   const supabase = await getDb();
   if (!supabase) return null;
   const dateStr = typeof data.date === 'string' ? data.date : data.date.toISOString().split('T')[0];
@@ -523,6 +701,11 @@ export async function upsertActivityTracker(data: any) {
 }
 
 export async function getActivityTracker(userId: number, date: Date | string) {
+  if (isTest) {
+    const dateStr = typeof date === 'string' ? date : date.toISOString().split('T')[0];
+    return mockActivityTrackers.find(t => t.userId === userId && t.date === dateStr) ?? null;
+  }
+
   const supabase = await getDb();
   if (!supabase) return null;
   const dateStr = typeof date === 'string' ? date : date.toISOString().split('T')[0];
@@ -533,6 +716,18 @@ export async function getActivityTracker(userId: number, date: Date | string) {
 
 // Progress Metrics Queries
 export async function upsertProgressMetric(data: any) {
+  if (isTest) {
+    const metricDateVal = typeof data.metricDate === 'string' ? new Date(data.metricDate) : data.metricDate;
+    const existingIndex = mockProgressMetrics.findIndex(t => t.userId === data.userId && t.metricDate.getTime() === metricDateVal.getTime());
+    const finalData = { ...data, metricDate: metricDateVal };
+    if (existingIndex > -1) {
+      mockProgressMetrics[existingIndex] = { ...mockProgressMetrics[existingIndex], ...finalData };
+    } else {
+      mockProgressMetrics.push(finalData);
+    }
+    return finalData;
+  }
+
   const supabase = await getDb();
   if (!supabase) return null;
   const { data: existing, error: selErr } = await supabase.from('progress_metrics').select('*').eq('userId', data.userId).eq('metricDate', data.metricDate).maybeSingle();
@@ -564,6 +759,13 @@ export async function upsertProgressMetric(data: any) {
 }
 
 export async function getProgressMetrics(userId: number, days: number = 30) {
+  if (isTest) {
+    return mockProgressMetrics
+      .filter(m => m.userId === userId)
+      .sort((a, b) => b.metricDate.getTime() - a.metricDate.getTime())
+      .slice(0, days);
+  }
+
   const supabase = await getDb();
   if (!supabase) return [];
   const { data, error } = await supabase.from('progress_metrics').select('*').eq('userId', userId).order('metricDate', { ascending: false }).limit(days);
@@ -578,6 +780,19 @@ export async function getProgressMetrics(userId: number, days: number = 30) {
 }
 
 export async function demoLogin() {
+  if (isTest) {
+    const demoUser = {
+      openId: "demo_user",
+      name: "Demo User",
+      email: "demo@healthflow.com",
+      loginMethod: "demo",
+      role: "admin",
+      lastSignedIn: new Date()
+    };
+    mockUsers.set(demoUser.openId, demoUser);
+    return demoUser;
+  }
+
   const demoUser = {
     openId: "demo_user",
     name: "Demo User",
@@ -594,6 +809,18 @@ export async function demoLogin() {
 
 // Daily Metrics Queries
 export async function upsertDailyMetric(data: any) {
+  if (isTest) {
+    const dateStr = typeof data.date === 'string' ? data.date : data.date.toISOString().split('T')[0];
+    const existingIndex = mockDailyMetrics.findIndex(m => m.userId === data.userId && m.date === dateStr);
+    const finalData = { ...data, date: dateStr };
+    if (existingIndex > -1) {
+      mockDailyMetrics[existingIndex] = { ...mockDailyMetrics[existingIndex], ...finalData };
+    } else {
+      mockDailyMetrics.push(finalData);
+    }
+    return finalData;
+  }
+
   const supabase = await getDb();
   if (!supabase) return null;
 
@@ -631,6 +858,11 @@ export async function upsertDailyMetric(data: any) {
 }
 
 export async function getDailyMetric(userId: number, date: Date | string) {
+  if (isTest) {
+    const dateStr = typeof date === 'string' ? date : date.toISOString().split('T')[0];
+    return mockDailyMetrics.find(m => m.userId === userId && m.date === dateStr) ?? null;
+  }
+
   const supabase = await getDb();
   if (!supabase) return null;
   const dateStr = typeof date === 'string' ? date : date.toISOString().split('T')[0];
