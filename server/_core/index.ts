@@ -32,10 +32,19 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   app.use(cors({
-    origin: [
-      "http://localhost:3000",
-      "https://fitness-tracker-system.vercel.app"
-    ],
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      const isAllowed = 
+        origin === "https://fitness-tracker-system.vercel.app" ||
+        origin.endsWith(".vercel.app") ||
+        origin.startsWith("http://localhost:") ||
+        origin.startsWith("http://127.0.0.1:");
+      if (isAllowed) {
+        callback(null, true);
+      } else {
+        callback(null, false);
+      }
+    },
     credentials: true
   }));
   const server = createServer(app);
@@ -46,16 +55,27 @@ async function startServer() {
   // Chat API with streaming and tool calling
   registerChatRoutes(app);
   // tRPC API
+  const trpcMiddleware = createExpressMiddleware({
+    router: appRouter,
+    createContext,
+  });
+
   app.use(
     "/api/trpc",
     (req, res, next) => {
       console.log(`[Express Trace] Hit /api/trpc: ${req.method} ${req.url}`);
       next();
     },
-    createExpressMiddleware({
-      router: appRouter,
-      createContext,
-    })
+    trpcMiddleware
+  );
+
+  app.use(
+    "/trpc",
+    (req, res, next) => {
+      console.log(`[Express Trace] Hit /trpc: ${req.method} ${req.url}`);
+      next();
+    },
+    trpcMiddleware
   );
 
   // development mode uses Vite, production mode uses static files
