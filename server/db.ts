@@ -112,20 +112,42 @@ export async function upsertUser(user: InsertUser): Promise<void> {
     } as InsertUser;
 
     // Try existing user by openId
-    const { data: existing, error: selectErr } = await supabase.from('users').select('*').eq('openId', user.openId).maybeSingle();
-    if (selectErr) console.warn('[Database] upsertUser select error:', selectErr);
+    let existing = null;
+    const { data, error: selectErr } = await supabase.from('users').select('*').eq('openId', user.openId).maybeSingle();
+    if (selectErr) {
+      console.warn('[Database] upsertUser select error:', selectErr);
+      if (selectErr.code === 'PGRST205' || (selectErr.message && selectErr.message.includes('Could not find the table'))) {
+        existing = await pgMaybeSingle('SELECT * FROM public.users WHERE "openId" = $1 LIMIT 1', [user.openId]);
+      }
+    } else {
+      existing = data;
+    }
 
     if (existing) {
       const { error: updateErr } = await supabase.from('users').update(values).eq('openId', user.openId);
       if (updateErr) {
         console.error('[Database] Failed to update user:', updateErr);
-        throw updateErr;
+        if (updateErr.code === 'PGRST205' || (updateErr.message && updateErr.message.includes('Could not find the table'))) {
+          await pgQuery(
+            'UPDATE public.users SET name = $1, email = $2, "loginMethod" = $3, "lastSignedIn" = $4, role = $5, "updatedAt" = NOW() WHERE "openId" = $6',
+            [values.name, values.email, values.loginMethod, values.lastSignedIn, values.role, user.openId]
+          );
+        } else {
+          throw updateErr;
+        }
       }
     } else {
       const { error: insertErr } = await supabase.from('users').insert([values]);
       if (insertErr) {
         console.error('[Database] Failed to insert user:', insertErr);
-        throw insertErr;
+        if (insertErr.code === 'PGRST205' || (insertErr.message && insertErr.message.includes('Could not find the table'))) {
+          await pgQuery(
+            'INSERT INTO public.users ("openId", name, email, "loginMethod", "lastSignedIn", role, "createdAt", "updatedAt") VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())',
+            [values.openId, values.name, values.email, values.loginMethod, values.lastSignedIn, values.role]
+          );
+        } else {
+          throw insertErr;
+        }
       }
     }
   } catch (error) {
@@ -148,6 +170,19 @@ export async function getUserByOpenId(openId: string) {
   const { data, error } = await supabase.from('users').select('*').eq('openId', openId).maybeSingle();
   if (error) {
     console.warn('[Database] getUserByOpenId error:', error);
+    if (error.code === 'PGRST205' || (error.message && error.message.includes('Could not find the table'))) {
+      const row = await pgMaybeSingle('SELECT * FROM public.users WHERE "openId" = $1 LIMIT 1', [openId]);
+      if (row) {
+        return {
+          ...row,
+          openId: row.openId ?? row.openid,
+          loginMethod: row.loginMethod ?? row.loginmethod,
+          lastSignedIn: row.lastSignedIn ?? row.lastsignedin,
+          createdAt: row.createdAt ?? row.createdat,
+          updatedAt: row.updatedAt ?? row.updatedat,
+        };
+      }
+    }
     return null;
   }
   return data ?? null;
@@ -867,6 +902,21 @@ export async function getDailyMetric(userId: number, date: Date | string) {
   if (!supabase) return null;
   const dateStr = typeof date === 'string' ? date : date.toISOString().split('T')[0];
   const { data, error } = await supabase.from('daily_metrics').select('*').eq('userId', userId).eq('date', dateStr).maybeSingle();
-  if (error) console.warn('[Database] getDailyMetric error:', error);
+  if (error) {
+    console.warn('[Database] getDailyMetric error:', error);
+    if (error.code === 'PGRST205' || (error.message && error.message.includes('Could not find the table'))) {
+      const row = await pgMaybeSingle('SELECT * FROM public.daily_metrics WHERE "userId" = $1 AND "date" = $2 LIMIT 1', [userId, dateStr]);
+      if (row) {
+        return {
+          ...row,
+          totalCalories: row.totalcalories ?? row.totalCalories ?? 0,
+          totalProtein: row.totalprotein ?? row.totalProtein ?? 0,
+          workoutMinutes: row.workoutminutes ?? row.workoutMinutes ?? 0,
+          steps: row.steps ?? 0,
+          weight: row.weight ? Number(row.weight) : null,
+        };
+      }
+    }
+  }
   return data ?? null;
 }

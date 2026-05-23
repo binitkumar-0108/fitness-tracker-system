@@ -69,12 +69,12 @@ export async function createContext(
           throw upsertErr;
         }
       } else {
-        logToFile(`[TRPC Context] Updating lastSignedIn for existing user...`);
+        logToFile(`[TRPC Context] Updating lastSignedIn and profile for existing user...`);
         try {
           await db.upsertUser({
             openId: openId,
-            name: existingUser.name,
-            email: existingUser.email,
+            name: decodedToken.name || existingUser.name,
+            email: decodedToken.email || existingUser.email,
             loginMethod: existingUser.loginMethod,
             role: existingUser.role,
             lastSignedIn: signedInAt,
